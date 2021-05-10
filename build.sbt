@@ -2,14 +2,14 @@ import sbtcrossproject.CrossPlugin.autoImport.{ CrossType, crossProject }
 import sbt.Keys._
 import locales._
 
-lazy val cldrApiVersion = "2.5.0"
+lazy val cldrApiVersion = "2.6.0"
 
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 resolvers in Global += Resolver.sonatypeRepo("public")
 
 ThisBuild / scalaVersion := "2.13.3"
-ThisBuild / crossScalaVersions := Seq("2.11.12", "2.12.12", "2.13.3", "3.0.0-RC2", "3.0.0-RC3")
+ThisBuild / crossScalaVersions := Seq("2.11.12", "2.12.13", "2.13.3", "3.0.0-RC2", "3.0.0-RC3")
 
 ThisBuild / githubWorkflowTargetTags ++= Seq("v*")
 ThisBuild / githubWorkflowPublishTargetBranches +=
@@ -45,7 +45,6 @@ val commonSettings: Seq[Setting[_]] = Seq(
     )
   )),
   Compile / doc / scalacOptions := Seq(),
-  Compile / doc / sources := { if (isDotty.value) Seq() else (Compile / doc / sources).value },
   Compile / unmanagedSourceDirectories ++= scalaVersionSpecificFolders("main",
                                                                        baseDirectory.value,
                                                                        scalaVersion.value
@@ -104,15 +103,17 @@ lazy val scalajs_locales: Project = project
   // don't include scala-native by default
   .aggregate(core.js,
              core.jvm,
+             core.native,
              testSuite.js,
              testSuite.jvm,
+             testSuite.native,
              localesFullDb,
              localesFullCurrenciesDb,
              localesMinimalEnDb,
              demo
   )
 
-lazy val core = crossProject(JVMPlatform, JSPlatform)
+lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Full)
   .in(file("core"))
   .settings(commonSettings: _*)
@@ -129,25 +130,24 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
     ))
   )
   .jsSettings(
-    scalacOptions ++= {
-      if (isDotty.value) Seq("-scalajs-genStaticForwardersForNonTopLevelObjects")
-      else Seq("-P:scalajs:genStaticForwardersForNonTopLevelObjects")
-    },
-    scalacOptions ++= {
-      if (isDotty.value) Seq.empty
-      else {
+    scalacOptions ++= (CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((3, _)) => Seq("-scalajs-genStaticForwardersForNonTopLevelObjects")
+      case _ => Seq("-P:scalajs:genStaticForwardersForNonTopLevelObjects")
+    }),
+    scalacOptions ++= (CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((3, _)) => Seq.empty
+      case _ =>
         val tagOrHash =
           if (isSnapshot.value) sys.process.Process("git rev-parse HEAD").lineStream_!.head
           else s"v${version.value}"
-      (Compile / sourceDirectories).value.map { dir =>
-        val a = dir.toURI.toString
-        val g =
-          "https://raw.githubusercontent.com/cquiroz/scala-java-locales/" + tagOrHash + "/core/src/main/scala"
-        s"-P:scalajs:mapSourceURI:$a->$g/"
-      }
-    }
-  }
-)
+        (Compile / sourceDirectories).value.map { dir =>
+          val a = dir.toURI.toString
+          val g =
+            "https://raw.githubusercontent.com/cquiroz/scala-java-locales/" + tagOrHash + "/core/src/main/scala"
+          s"-P:scalajs:mapSourceURI:$a->$g/"
+        }
+    })
+  )
 
 lazy val cldrDbVersion = "36.0"
 
@@ -166,8 +166,7 @@ lazy val localesFullCurrenciesDb = project
     supportDateTimeFormats := true,
     supportNumberFormats := true,
     supportISOCodes := true,
-    libraryDependencies += ("org.portable-scala" %%% "portable-scala-reflect" % "1.1.1")
-      .withDottyCompat(scalaVersion.value)
+    libraryDependencies += ("org.portable-scala" %%% "portable-scala-reflect" % "1.1.1").cross(CrossVersion.for3Use2_13)
   )
 
 lazy val localesFullDb = project
@@ -185,8 +184,7 @@ lazy val localesFullDb = project
     supportDateTimeFormats := true,
     supportNumberFormats := true,
     supportISOCodes := true,
-    libraryDependencies += ("org.portable-scala" %%% "portable-scala-reflect" % "1.1.1")
-      .withDottyCompat(scalaVersion.value)
+    libraryDependencies += ("org.portable-scala" %%% "portable-scala-reflect" % "1.1.1").cross(CrossVersion.for3Use2_13)
   )
 
 lazy val localesMinimalEnDb = project
@@ -204,11 +202,10 @@ lazy val localesMinimalEnDb = project
     supportDateTimeFormats := true,
     supportNumberFormats := true,
     supportISOCodes := false,
-    libraryDependencies += ("org.portable-scala" %%% "portable-scala-reflect" % "1.1.1")
-      .withDottyCompat(scalaVersion.value)
+    libraryDependencies += ("org.portable-scala" %%% "portable-scala-reflect" % "1.1.1").cross(CrossVersion.for3Use2_13)
   )
 
-lazy val testSuite = crossProject(JVMPlatform, JSPlatform)
+lazy val testSuite = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .in(file("testSuite"))
   .settings(commonSettings: _*)
   .settings(
@@ -251,16 +248,16 @@ lazy val macroUtils = project
   .settings(commonSettings)
   .settings(
     name := "macroutils",
-    libraryDependencies ++= {
-      if (isDotty.value) Seq.empty else Seq("org.scala-lang" % "scala-reflect" % scalaVersion.value)
-    },
+    libraryDependencies ++= (CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((3, _)) => Seq.empty
+      case _ => Seq("org.scala-lang" % "scala-reflect" % scalaVersion.value)
+    }),
     scalacOptions ~= (_.filterNot(
       Set(
         "-deprecation",
         "-Xfatal-warnings"
       )
-    )),
-    Compile / doc / sources := { if (isDotty.value) Seq() else (Compile / doc / sources).value }
+    ))
   )
 
 lazy val demo = project
